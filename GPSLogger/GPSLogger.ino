@@ -41,6 +41,7 @@ String _newTripName;
 int _usePrevious = 0;
 int _advancePrevious = 0;
 
+//Timekeeping
 unsigned long _currentTime;
 unsigned long _lastGPSUpdate = 0;
 
@@ -160,6 +161,24 @@ void CheckButtons()
 					else 
 					{
 						DeleteSelectedTrip();
+
+						//After the trip has been deleted, we need to fix the selected trip position
+
+						_selectedTripPos += 1;
+						if (_selectedTripPos > MAX_TRIPS - 1)
+							_selectedTripPos = 0;
+
+						while (_trips[_selectedTripPos].friendlyName.length() == 0)
+						{
+							_selectedTripPos++;
+
+							if (_selectedTripPos > MAX_TRIPS - 1)
+								_selectedTripPos = 0;
+						}
+
+						//Now go back to the main menu
+						_currentMenuMode = SelectMode;
+						_currentCursorPos = 0;
 					}
 				}
 			}
@@ -219,6 +238,16 @@ void StartNewTrip()
 {
 	//New trip offset is equal to the number of trips.
 	_currentTripOffset = _numTrips;
+	
+	//If we deleted a trip, there may be a hole in the trips collection, so we need to find the first
+	//vacant spot. I.e. where the trip name is still blank.
+	while (_trips[_currentTripOffset].friendlyName.length() == 0)
+	{
+		_currentTripOffset++;
+
+		if (_currentTripOffset > MAX_TRIPS - 1)
+			_currentTripOffset = 0;
+	}
 
 	//Increase number of trips
 	_numTrips++;
@@ -254,7 +283,36 @@ void StartNewTrip()
 
 void DeleteSelectedTrip()
 {
-	//Todo figure out how to delete...
+	//Remove the trip from the trips list
+	_trips[_selectedTripPos].friendlyName = "";
+	_trips[_selectedTripPos].pollRate = -1;
+	_trips[_selectedTripPos].uniqueID = 0;
+
+	//Number of trips just dropped by one
+	_numTrips--;
+
+	//Delete the trips descriptor file
+	if (_fatfs.remove(TRIPS_DESCRIPTOR_FILE))
+	{
+		//Create new trips descriptor file
+		File tripsFile = _fatfs.open(TRIPS_DESCRIPTOR_FILE, FILE_WRITE);
+		if (tripsFile)
+		{
+			//Put all the valid trips in it
+			for (int i = 0; i < MAX_TRIPS; i++)
+			{
+				//If this is a valid trip
+				if (_trips[i].friendlyName.length() > 0)
+				{
+					tripsFile.println(_trips[i].friendlyName);
+					tripsFile.println(_trips[i].uniqueID);
+					tripsFile.println(_trips[i].pollRate);
+				}
+			}
+
+			tripsFile.close();
+		}
+	}
 }
 
 void ResumeSelectedTrip()
@@ -267,6 +325,32 @@ void ResumeSelectedTrip()
 	_currentUpdateRate = _trips[_currentTripOffset].pollRate;
 
 	//Load the trip file, find the last log point so we can display it on screen
+	String tripFileName = String(_trips[_currentTripOffset].uniqueID) + String(".txt");
+
+	File tripFile = _fatfs.open(tripFileName, FILE_READ);
+
+	if (tripFile)
+	{
+		String currentLine;
+		while (tripFile.available())
+		{
+			currentLine = tripFile.readStringUntil('\n');
+
+			Serial.print("Reading: ");
+			Serial.println(currentLine);
+		}
+
+		tripFile.close();
+
+		//currentLine now contains the last GPS entry
+		if (currentLine.length() > 0)
+		{
+			//Valid entry - copy the bytes. Sizeof _lastPoint guarantees we don't get the extra newline character at the end of the string, or the null terminator.
+			memcpy((char*)&_lastPoint, currentLine.c_str(), sizeof(_lastPoint));
+		}
+		else
+			_lastPoint.day = INVALID_POINT_DAY;
+	}
 
 	_currentMode = Track;
 }
@@ -278,6 +362,7 @@ void UpdateCurrentTrip()
 		// a tricky thing here is if we print the NMEA sentence, or data
 		// we end up not listening and catching other sentences!
 		// so be very wary if using OUTPUT_ALLDATA and trytng to print out data
+		Serial.println(_gps.lastNMEA());
 		if (!_gps.parse(_gps.lastNMEA())) // this also sets the newNMEAreceived() flag to false
 			return; // we can fail to parse a sentence in which case we should just wait for another
 	}
@@ -310,6 +395,20 @@ void UpdateCurrentTrip()
 			_lastPoint.altitude = _gps.altitude;
 
 			//Save data to file
+			String tripFileName = String(_trips[_currentTripOffset].uniqueID) + String(".txt");
+			File tripFile = _fatfs.open(tripFileName, FILE_WRITE);
+			if (tripFile)
+			{
+				char buffer[sizeof(_lastPoint)];
+				memcpy(buffer, (char*)&_lastPoint, sizeof(_lastPoint));
+
+				Serial.print("Writing: ");
+				Serial.println(buffer);
+
+				tripFile.println(buffer);
+
+				tripFile.close();
+			}
 		}
 		else
 			_lastPoint.day = INVALID_POINT_DAY;
