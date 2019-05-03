@@ -4,6 +4,7 @@
 #include <Adafruit_SPIFlash_FatFs.h>
 #include <Adafruit_GPS.h>
 #include <Wire.h>
+#include <Keyboard.h>
 #include "GPSLogger.h"
 
 // -- HW --
@@ -21,7 +22,7 @@ systemConfiguration _config;
 //Current mode of the system
 e_SystemMode _currentMode = Menu;
 e_MenuMode _currentMenuMode = SelectMode;
-bool _needRedraw;
+bool _needRedraw = true;
 trip _trips[20];
 int _numTrips = 0;
 
@@ -78,6 +79,8 @@ void CheckButtons()
 	int sample = digitalRead(USE_PIN);
 	if (sample == HIGH && sample != _usePrevious)
 	{
+		_needRedraw = true;
+
 		if (_currentMode == Menu)
 		{
 			if (_currentMenuMode == SelectMode)
@@ -125,10 +128,10 @@ void CheckButtons()
 				{
 					//todo handle invalid trip number (over 20)
 					StartNewTrip();
-          _currentCursorPos = 0;
+					_currentCursorPos = 0;
 				}
 			}
-			else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip)
+			else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip || _currentMenuMode == Dump)
 			{
 				if (_currentCursorPos == 0)
 				{
@@ -151,14 +154,14 @@ void CheckButtons()
 					_currentMenuMode = SelectMode;
 					_currentCursorPos = 0;
 				}
-				if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETE)
+				if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETEDUMP)
 				{
 					if (_currentMenuMode == ResumeTrip)
 					{
 						ResumeSelectedTrip();
 						_currentCursorPos = 0;
 					}
-					else 
+					else if (_currentMenuMode == DeleteTrip)
 					{
 						DeleteSelectedTrip();
 
@@ -177,6 +180,14 @@ void CheckButtons()
 						}
 
 						//Now go back to the main menu
+						_currentMenuMode = SelectMode;
+						_currentCursorPos = 0;
+					}
+					else if (_currentMenuMode == Dump)
+					{
+						DumpSelectedTrip();
+						
+						//Now go back to main menu
 						_currentMenuMode = SelectMode;
 						_currentCursorPos = 0;
 					}
@@ -202,6 +213,7 @@ void CheckButtons()
 	int sample2 = digitalRead(ADVANCE_PIN);
 	if (sample2 == HIGH && sample2 != _advancePrevious)
 	{
+		_needRedraw = true;
 		if (_currentMenuMode == SelectMode)
 		{
 			if (_selectedMode == NewTrip)
@@ -209,7 +221,7 @@ void CheckButtons()
 				_currentMenuMode = _selectedMode;
 				_currentCursorPos = 0;
 			}
-			if (_selectedMode == ResumeTrip || _selectedMode == DeleteTrip)
+			if (_selectedMode == ResumeTrip || _selectedMode == DeleteTrip || _selectedMode == Dump)
 			{
 				_currentMenuMode = _selectedMode;
 				_currentCursorPos = 0;
@@ -222,7 +234,7 @@ void CheckButtons()
 			if (_currentCursorPos > 18)
 				_currentCursorPos = 0;
 		}
-		else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip)
+		else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip || _selectedMode == Dump)
 		{
 			_currentCursorPos++;
 			if (_currentCursorPos > 2)
@@ -241,7 +253,7 @@ void StartNewTrip()
 	
 	//If we deleted a trip, there may be a hole in the trips collection, so we need to find the first
 	//vacant spot. I.e. where the trip name is still blank.
-	while (_trips[_currentTripOffset].friendlyName.length() == 0)
+	while (_trips[_currentTripOffset].friendlyName.length() != 0)
 	{
 		_currentTripOffset++;
 
@@ -380,7 +392,7 @@ void UpdateCurrentTrip()
 		Serial.println(_gps.fixquality);
 
 		//need update
-		if (_gps.fixquality > 1)
+		if (_gps.fixquality > 0)
 		{
 			_lastPoint.day = _gps.day;
 			_lastPoint.month = _gps.month;
@@ -394,31 +406,63 @@ void UpdateCurrentTrip()
 			_lastPoint.longitude = _gps.longitude;
 			_lastPoint.altitude = _gps.altitude;
 
+			_lastPoint.lat = _gps.lat;
+			_lastPoint.lon = _gps.lon;
+			
 			//Save data to file
 			String tripFileName = String(_trips[_currentTripOffset].uniqueID) + String(".txt");
 			File tripFile = _fatfs.open(tripFileName, FILE_WRITE);
 			if (tripFile)
 			{
-				char buffer[sizeof(_lastPoint)];
-				memcpy(buffer, (char*)&_lastPoint, sizeof(_lastPoint));
-
-				Serial.print("Writing: ");
-				Serial.println(buffer);
-
-				tripFile.println(buffer);
+				tripFile.write((uint8_t*)&_lastPoint, sizeof(_lastPoint));
+				tripFile.write('\n');
 
 				tripFile.close();
 			}
+
+			_needRedraw = true;
 		}
-		else
-			_lastPoint.day = INVALID_POINT_DAY;
 
 		_lastGPSUpdate += (_currentUpdateRate * 1000);
 	}
 }
 
+void DumpSelectedTrip()
+{
+	String tripFileName = String(_trips[_selectedTripPos].uniqueID) + String(".txt");
+	File tripFile = _fatfs.open(tripFileName, FILE_READ);
+	if (tripFile)
+	{
+		String currentLine;
+		logPoint currentPoint;
+		char buf[100];
+		while (tripFile.available())
+		{
+			currentLine = tripFile.readStringUntil('\n');
+			
+			if (currentLine.length() > 0)
+			{
+				memcpy((char*)&currentPoint, currentLine.c_str(), sizeof(currentPoint));
+				PointToFullString(&currentPoint, buf);
+				for (int i = 0; i < 100; i++)
+				{
+					Keyboard.write(buf[i]);
+					if (buf[i] == '\n')
+						break;
+				}
+			}
+		}
+
+		tripFile.close();
+	}
+	else
+		Serial.println("Failed to open trip file!");
+}
+
 void Render()
 {
+	if (!_needRedraw) return;
+
 	_display.clearBuffer();
 
 	switch (_currentMode) 
@@ -435,6 +479,7 @@ void Render()
 	}
 
 	_display.sendBuffer();
+	_needRedraw = false;
 }
 
 void RenderMode_Menu()
@@ -443,8 +488,8 @@ void RenderMode_Menu()
 
 	if (_currentMenuMode == SelectMode)
 		RenderMenu_SelectMode();
-	else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip)
-		RenderMenu_ResumeDeleteTrip();
+	else if (_currentMenuMode == ResumeTrip || _currentMenuMode == DeleteTrip || _currentMenuMode == Dump)
+		RenderMenu_ResumeDeleteDumpTrip();
 	else if (_currentMenuMode == NewTrip)
 		RenderMenu_NewTrip();
 }
@@ -521,7 +566,7 @@ void RenderMode_Header()
 	_display.setFont(u8g2_font_t0_12_tr);
 }
 
-void RenderMenu_ResumeDeleteTrip()
+void RenderMenu_ResumeDeleteDumpTrip()
 {
 	_display.drawStr(0, PT_8_FONT_ROW_2, "Trip:");
 
@@ -540,18 +585,18 @@ void RenderMenu_ResumeDeleteTrip()
 	_display.setFontMode(0); 
 	if (_currentCursorPos > 0)
 	{
-		if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETE)
+		if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETEDUMP)
 			_display.drawBox(0, PT_8_FONT_ROW_3_H, 36, 10);
 		else
 			_display.drawBox(42, PT_8_FONT_ROW_3_H, 36, 10);
 	}
-	if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETE)
+	if (_currentCursorPos == CURSOR_POS_RESDELTRIP_RESUMEDELETEDUMP)
 	{
 		_display.setDrawColor(0);
 		_display.setFontMode(1);
 	}
 
-	_display.drawStr(0, PT_8_FONT_ROW_3, _currentMenuMode == ResumeTrip ? "RESUME" : "DELETE");
+	_display.drawStr(0, PT_8_FONT_ROW_3, _currentMenuMode == ResumeTrip ? "RESUME" : _currentMenuMode == DeleteTrip ? "DELETE" : "DUMP");
 
 	_display.setDrawColor(_currentCursorPos == CURSOR_POS_RESDELTRIP_CANCEL ? 0 : 1);
 	_display.setFontMode(_currentCursorPos == CURSOR_POS_RESDELTRIP_CANCEL ? 1 : 0);
@@ -719,6 +764,6 @@ bool InitGPS()
 	_gps.begin(9600);
 	_gps.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
 	_gps.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
-  _gps.sendCommand(PGCMD_NOANTENNA);
+	_gps.sendCommand(PGCMD_NOANTENNA);
 	return true;
 }

@@ -27,7 +27,7 @@ const uint8_t CURSOR_POS_NEWTRIP_RATE = 16;
 const uint8_t CURSOR_POS_NEWTRIP_START = 17;
 const uint8_t CURSOR_POS_NEWTRIP_CANCEL = 18;
 
-const uint8_t CURSOR_POS_RESDELTRIP_RESUMEDELETE = 1;
+const uint8_t CURSOR_POS_RESDELTRIP_RESUMEDELETEDUMP = 1;
 const uint8_t CURSOR_POS_RESDELTRIP_CANCEL = 2;
 
 //15s 30s 1m 15m 30m 1h 2h 4h 
@@ -35,11 +35,17 @@ const int UPDATE_RATES[8] = { 15, 30, 60, 900, 1800, 3600, 7200, 14400 };
 
 typedef struct 
 {
-	uint8_t hours, minutes, seconds;
-	uint8_t year, month, day;
-	float latitude, longitude;
+	uint8_t hours;
+	uint8_t minutes;
+	uint8_t seconds;
+	uint8_t year;
+	uint8_t month;
+	uint8_t day;
+	uint8_t lat;
+	uint8_t lon;
+	float latitude;
+	float longitude;
 	float altitude;
-	int* next;
 }logPoint;
 
 typedef struct
@@ -110,6 +116,11 @@ int GetTripNameLength(const trip* trip)
 void PointToString(const logPoint* point, char* string)
 {
 	sprintf(string, "%d/%d/20%d %d:%d", point->day, point->month, point->year, point->hours, point->minutes);
+}
+
+void PointToFullString(const logPoint* point, char* string)
+{
+	sprintf(string, "%d/%d/20%d %d:%d:%d -- Lat=%f%c Long=%f%c Alt=%fm\n", point->day, point->month, point->year, point->hours, point->minutes, point->seconds, point->latitude, point->lat, point->longitude, point->lon, point->altitude);
 }
 
 void MenuModeToString(e_MenuMode mode, char* string, int* size)
