@@ -45,6 +45,7 @@ int _advancePrevious = 0;
 //Timekeeping
 unsigned long _currentTime;
 unsigned long _lastGPSUpdate = 0;
+unsigned long _lastRenderTime = 0;
 
 void setup() {
   // put your setup code here, to run once:
@@ -433,6 +434,10 @@ void DumpSelectedTrip()
 	File tripFile = _fatfs.open(tripFileName, FILE_READ);
 	if (tripFile)
 	{
+		//Write the trip name
+		const char* tripName = _trips[_selectedTripPos].friendlyName.c_str();
+		Keyboard.write((unsigned char*)tripName, sizeof(tripName));
+		Keyboard.write('\n');
 		String currentLine;
 		logPoint currentPoint;
 		char buf[100];
@@ -461,7 +466,16 @@ void DumpSelectedTrip()
 
 void Render()
 {
+	//If the last time we rendered was more than the timeout period ago, then shut off the display.
+	if (_currentTime - _lastRenderTime > DISPLAY_TIMEOUT)
+		_display.setPowerSave(true);
+
 	if (!_needRedraw) return;
+
+	//record last render time
+	_lastRenderTime = _currentTime;
+	//Turn the display on
+	_display.setPowerSave(false);
 
 	_display.clearBuffer();
 

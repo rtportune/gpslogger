@@ -13,6 +13,8 @@ const uint8_t ADVANCE_PIN = 11;
 const uint8_t INVALID_POINT_DAY = 255;
 const uint8_t MAX_TRIPS = 20;
 
+const uint16_t DISPLAY_TIMEOUT = 5000;
+
 //Starting Y cursor coordinates for rendering menu strings (using 8-pt fonts)
 const uint8_t PT_8_FONT_ROW_2 = 26;
 const uint8_t PT_8_FONT_ROW_3 = 37;
